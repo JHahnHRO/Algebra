@@ -193,6 +193,66 @@ public final class StepFunction<X, V> implements Function<X, V> {
     }
 
     /**
+     * @param partition a map defining intervals and values that the function should have on each of those intervals
+     * @param <X>       the type of the domain
+     * @param <V>       the type of the values
+     * @return a StepFunction having the given values on the given intervals, undefined outside.
+     * @throws NullPointerException     if {@code partition} is or contains {@code null} either as a key or as a value.
+     * @throws IllegalArgumentException if the partition contains empty intervals, if it contains overlapping interval,
+     *                                  or if the intervals do not all use the same comparator.
+     */
+    public static <X, V> StepFunction<X, V> fromPartitionWithValues(Map<Interval<X>, V> partition) {
+        return fromPartitionWithValues(partition, null);
+    }
+
+    /**
+     * @param partition    a map defining intervals and values that the function should have on each of those
+     *                     intervals.
+     * @param defaultValue the value the function takes outside the given intervals.
+     * @param <X>          the type of the domain
+     * @param <V>          the type of the values
+     * @return a StepFunction having the given values on the given intervals, and {@code defaultValue} outside.
+     * @throws NullPointerException     if {@code partition} is {@code null} or contains {@code null} as a key.
+     * @throws IllegalArgumentException if the partition contains empty intervals, if it contains overlapping interval,
+     *                                  or if the intervals do not all use the same comparator.
+     */
+    public static <X, V> StepFunction<X, V> fromPartitionWithValues(Map<Interval<X>, V> partition, V defaultValue) {
+        var iterator = partition.keySet().iterator();
+        if (!iterator.hasNext()) {
+            throw new IllegalArgumentException("Partition is empty.");
+        }
+
+        Comparator<? super X> xComparator = iterator.next().comparator();
+
+        // start with a StepFunction that is default everywhere
+        NavigableMap<X, V> values = newConstantValues(defaultValue, xComparator);
+
+        PartitionMerger<X, V, V, V> merger = new PartitionMerger<>((oldValue, newValue) -> {
+            if (oldValue == defaultValue) {
+                return newValue;
+            } else if (newValue == defaultValue) {
+                return oldValue;
+            } else {
+                throw new IllegalArgumentException("Intervals must not overlap");
+            }
+        });
+        for (var entry : partition.entrySet()) {
+            Interval<X> interval = entry.getKey();
+            if (interval.isEmpty()) {
+                throw new IllegalArgumentException("Intervals must not be empty.");
+            }
+            if (!xComparator.equals(interval.comparator())) {
+                throw new IllegalArgumentException("Intervals must use compatible comparators");
+            }
+            V value = entry.getValue();
+            NavigableMap<X, V> additionalValues = StepFunction.singleStep(interval, value, defaultValue).values;
+            values = merger.apply(values, additionalValues);
+        }
+
+        return new StepFunction<>(values, xComparator);
+    }
+
+    /**
      * @return the list of this function's values, ordered by the given order on the domain beginning with the value at
      * "-infinity" and ending with the value at "+infinity".
      */

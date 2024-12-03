@@ -1,13 +1,15 @@
 package org.example.math;
 
 import static java.math.BigDecimal.*;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatNoException;
+import static org.assertj.core.api.Assertions.*;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static org.example.math.StepFunction.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BinaryOperator;
 
@@ -313,6 +315,62 @@ class StepFunctionTest {
                     Map.entry(Interval.of(Bound.unboundedBelow(), Bound.of(0)), BigDecimal.ONE),
                     Map.entry(Interval.of(0, 1), ZERO),
                     Map.entry(Interval.of(Bound.of(1), Bound.unboundedAbove()), TWO));
+        }
+
+        @Test
+        void givenEmptyPartition_thenThrowIAE() {
+            assertThatIllegalArgumentException().isThrownBy(
+                    () -> StepFunction.fromPartitionWithValues(Collections.emptyMap()));
+        }
+
+        @Test
+        void givenPartitionWithDifferentComparators_thenThrowIAE() {
+            var interval1 = Interval.of(1, 2);
+            var interval2 = new Interval<>(1, 2, Comparator.nullsLast(Comparator.naturalOrder()));
+
+            var map = Map.of(interval1, -1, interval2, -2);
+
+            assertThatIllegalArgumentException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenNullMap_thenThrowNPE() {
+            assertThatNullPointerException().isThrownBy(() -> StepFunction.fromPartitionWithValues(null));
+        }
+
+        @Test
+        void givenMapWithNullKey_thenThrowNPE() {
+            Map<Interval<Integer>, Object> map = new HashMap<>();
+            map.put(null, 42);
+
+            assertThatNullPointerException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenPartitionWithEmptyInterval_thenThrowIAE() {
+            var map = Map.of(Interval.of(1, 1), 42);
+
+            assertThatIllegalArgumentException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenPartitionWithOverlappingIntervals_thenThrowIAE() {
+            var map = Map.of(Interval.of(1, 3), 42, Interval.of(2, 4), 42); // even value is the same
+
+            assertThatIllegalArgumentException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenPartition_thenReturnCorrectFunction() {
+            var interval1 = Interval.of(Bound.unboundedBelow(), Bound.of(-10));
+            var interval2 = Interval.of(0, 1);
+
+            var map = Map.of(interval1, 42, interval2, 47);
+
+            var function = fromPartitionWithValues(map);
+
+            assertThat(function.support(0)).containsExactly(interval1, interval2);
+            assertThat(function.values()).containsExactly(42, null, 47, null);
         }
     }
 }
