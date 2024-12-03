@@ -1,12 +1,15 @@
 package org.example.math;
 
 import static java.math.BigDecimal.*;
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.*;
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 import static org.example.math.StepFunction.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BinaryOperator;
 
@@ -195,7 +198,7 @@ class StepFunctionTest {
         void twoAdjacentSteps() {
             StepFunction<Integer, BigDecimal> s1 = StepFunction.singleStep(Interval.of(1, 2), ONE);
             StepFunction<Integer, BigDecimal> s2 = StepFunction.singleStep(Interval.of(2, 3), BigDecimal.TWO);
-            var f = StepFunction.<Integer, BigDecimal>pointwise(BigDecimal::add).apply(s1, s2);
+            var f = ADDITION.apply(s1, s2);
 
             assertThat(f.support(ZERO)).containsExactly(Interval.of(1, 3));
         }
@@ -204,7 +207,7 @@ class StepFunctionTest {
         void sumOfTwoOverlappingSteps() {
             StepFunction<Integer, BigDecimal> s1 = StepFunction.singleStep(Interval.of(1, 3), ONE);
             StepFunction<Integer, BigDecimal> s2 = StepFunction.singleStep(Interval.of(2, 4), BigDecimal.TWO);
-            var f = StepFunction.<Integer, BigDecimal>pointwise(BigDecimal::add).apply(s1, s2);
+            var f = ADDITION.apply(s1, s2);
             // f equal to singleStep([1,2[, 1) + singleStep([2,3[, 3) + singleStep([3,4[, 2]
 
             assertThat(f.support(ZERO)).containsExactly(Interval.of(1, 4));
@@ -238,6 +241,53 @@ class StepFunctionTest {
     }
 
     @Nested
+    class TestPartialFunctions {
+
+        @Test
+        void everywhereUndefined() {
+            StepFunction<Integer, Integer> function = StepFunction.singleStep(Interval.<Integer>all(), null, null);
+
+            assertThat(function.apply(Integer.MIN_VALUE)).isNull();
+            assertThat(function.apply(0)).isNull();
+            assertThat(function.apply(Integer.MAX_VALUE)).isNull();
+        }
+
+        @Test
+        void singleStepWithNull() {
+            var interval = Interval.of(1, 3);
+
+            StepFunction<Integer, BigDecimal> function1 = singleStep(interval, TWO, null);
+            assertSoftly(softly -> {
+                softly.assertThat(function1.apply(Integer.MIN_VALUE)).isNull();
+                softly.assertThat(function1.apply(0)).isNull();
+                softly.assertThat(function1.apply(1)).isEqualTo(TWO);
+                softly.assertThat(function1.apply(2)).isEqualTo(TWO);
+                softly.assertThat(function1.apply(3)).isNull();
+                softly.assertThat(function1.apply(Integer.MAX_VALUE)).isNull();
+            });
+
+            StepFunction<Integer, BigDecimal> function2 = singleStep(interval, null, TWO);
+            assertSoftly(softly -> {
+                softly.assertThat(function2.apply(Integer.MIN_VALUE)).isEqualTo(TWO);
+                softly.assertThat(function2.apply(0)).isEqualTo(TWO);
+                softly.assertThat(function2.apply(1)).isNull();
+                softly.assertThat(function2.apply(2)).isNull();
+                softly.assertThat(function2.apply(3)).isEqualTo(TWO);
+                softly.assertThat(function2.apply(Integer.MAX_VALUE)).isEqualTo(TWO);
+            });
+
+        }
+
+        @Test
+        void nullsOutsideSupport() {
+            var interval = Interval.of(1, 3);
+            var function = singleStep(interval, ONE, null);
+
+            assertThat(function.support(ZERO)).containsExactly(interval);
+        }
+    }
+
+    @Nested
     class TestPartitionValues {
 
         @Test
@@ -263,8 +313,64 @@ class StepFunctionTest {
 
             assertThat(f.asPartitionWithValues()).containsExactly(
                     Map.entry(Interval.of(Bound.unboundedBelow(), Bound.of(0)), BigDecimal.ONE),
-                    Map.entry(Interval.of(0,1), ZERO),
+                    Map.entry(Interval.of(0, 1), ZERO),
                     Map.entry(Interval.of(Bound.of(1), Bound.unboundedAbove()), TWO));
+        }
+
+        @Test
+        void givenEmptyPartition_thenThrowIAE() {
+            assertThatIllegalArgumentException().isThrownBy(
+                    () -> StepFunction.fromPartitionWithValues(Collections.emptyMap()));
+        }
+
+        @Test
+        void givenPartitionWithDifferentComparators_thenThrowIAE() {
+            var interval1 = Interval.of(1, 2);
+            var interval2 = new Interval<>(1, 2, Comparator.nullsLast(Comparator.naturalOrder()));
+
+            var map = Map.of(interval1, -1, interval2, -2);
+
+            assertThatIllegalArgumentException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenNullMap_thenThrowNPE() {
+            assertThatNullPointerException().isThrownBy(() -> StepFunction.fromPartitionWithValues(null));
+        }
+
+        @Test
+        void givenMapWithNullKey_thenThrowNPE() {
+            Map<Interval<Integer>, Object> map = new HashMap<>();
+            map.put(null, 42);
+
+            assertThatNullPointerException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenPartitionWithEmptyInterval_thenThrowIAE() {
+            var map = Map.of(Interval.of(1, 1), 42);
+
+            assertThatIllegalArgumentException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenPartitionWithOverlappingIntervals_thenThrowIAE() {
+            var map = Map.of(Interval.of(1, 3), 42, Interval.of(2, 4), 42); // even value is the same
+
+            assertThatIllegalArgumentException().isThrownBy(() -> StepFunction.fromPartitionWithValues(map));
+        }
+
+        @Test
+        void givenPartition_thenReturnCorrectFunction() {
+            var interval1 = Interval.of(Bound.unboundedBelow(), Bound.of(-10));
+            var interval2 = Interval.of(0, 1);
+
+            var map = Map.of(interval1, 42, interval2, 47);
+
+            var function = fromPartitionWithValues(map);
+
+            assertThat(function.support(0)).containsExactly(interval1, interval2);
+            assertThat(function.values()).containsExactly(42, null, 47, null);
         }
     }
 }
