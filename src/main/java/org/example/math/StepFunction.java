@@ -26,16 +26,19 @@ import org.example.math.Interval.Bound;
 /**
  * Represents a "step function", i.e. a function whose domain can be partitioned into a finite number of
  * {@link Interval}s such that the function is constant on each interval.
+ * <p>
+ * The {@link #apply(Object)} method throws {@code NullPointerException} on {@code null} inputs, but may have
+ * {@code null} outputs (to represent partial functions).
  *
  * @param <X> the type of the domain.
+ * @param <V> the type of the values.
  */
 public final class StepFunction<X, V> implements Function<X, V> {
 
     // needed for equality testing, because Comparator.nullsFirst(..) does not override #equals()
     private final Comparator<? super X> xComparator;
     // invariants:
-    // 1. all values are non-null
-    // 2. all keys are non-null except the first one which represents -infinity
+    // - all keys are non-null except the first one which represents -infinity
     private final NavigableMap<X, V> values;
 
     private StepFunction(NavigableMap<X, V> values, Comparator<? super X> xComparator) {
@@ -46,10 +49,10 @@ public final class StepFunction<X, V> implements Function<X, V> {
 
     private void normalize() {
         var iterator = this.values.values().iterator();
-        V last = null;
+        V last = iterator.next(); // values map is never empty
         while (iterator.hasNext()) {
             var current = iterator.next();
-            if (current.equals(last)) { // implicit null check for all values in the map
+            if (Objects.equals(current, last)) { // implicit null check for all values in the map
                 // merge steps with equal values by removing intermediate entries
                 iterator.remove();
                 continue;
@@ -124,7 +127,6 @@ public final class StepFunction<X, V> implements Function<X, V> {
      */
     public static <X, V> StepFunction<X, V> singleStep(Interval<X> interval, V valueInside, V valueOutside) {
         Objects.requireNonNull(interval);
-        Objects.requireNonNull(valueInside);
 
         final TreeMap<X, V> newValues = newConstantValues(valueOutside, interval.comparator());
         if (!interval.isEmpty()) {
@@ -157,7 +159,7 @@ public final class StepFunction<X, V> implements Function<X, V> {
      * @return {@code true} iff this function is constant equal to the given value.
      */
     public boolean isConstant(final V value) {
-        return isConstant() && values.get(null).equals(value);
+        return isConstant() && Objects.equals(values.get(null), value);
     }
 
     /**
@@ -168,18 +170,24 @@ public final class StepFunction<X, V> implements Function<X, V> {
     public SequencedMap<Interval<X>, V> asPartitionWithValues() {
         SequencedMap<Interval<X>, V> result = new LinkedHashMap<>();
 
-        Iterator<Map.Entry<X, V>> iterator = values.entrySet().iterator();
-        Map.Entry<X, V> last = iterator.next();
+        var iterator = values.entrySet().iterator();
+        var currentEntry = iterator.next();
+        do {
+            Bound<X> lowerBound = currentEntry.getKey() == null ? unboundedBelow() : Bound.of(currentEntry.getKey());
 
-        while (iterator.hasNext()) {
-            Map.Entry<X, V> current = iterator.next();
+            Bound<X> upperBound;
+            Map.Entry<X, V> nextEntry;
+            if (iterator.hasNext()) {
+                nextEntry = iterator.next();
+                upperBound = Bound.of(nextEntry.getKey());
+            } else {
+                nextEntry = null;
+                upperBound = unboundedAbove();
+            }
+            result.putLast(new Interval<>(lowerBound, upperBound, xComparator), currentEntry.getValue());
 
-            Interval.Bound<X> lowerBound = last.getKey() == null ? Bound.unboundedBelow() : Bound.of(last.getKey());
-            result.putLast(new Interval<>(lowerBound, Bound.of(current.getKey()), xComparator), last.getValue());
-
-            last = current;
-        }
-        result.put(new Interval<>(Bound.of(last.getKey()), Bound.unboundedAbove(), xComparator), last.getValue());
+            currentEntry = nextEntry;
+        } while (currentEntry != null);
 
         return Collections.unmodifiableSequencedMap(result);
     }
@@ -189,43 +197,30 @@ public final class StepFunction<X, V> implements Function<X, V> {
      * "-infinity" and ending with the value at "+infinity".
      */
     public List<V> values() {
-        return List.copyOf(values.values());
+        return new ArrayList<>(values.values());
     }
 
     /**
-     * Returns the set where this step function differs from the given "zero" value, expressed as a list of disjoint
-     * {@link Interval}s. The returned list is empty iff this function is zero everywhere. The returned list contains
-     * the single, {@link Interval#all() all-encompassing interval} if this function is non-zero everywhere.
+     * Returns the subset of the domain where this step function has a value different from the given "zero" value,
+     * expressed as a list of disjoint {@link Interval}s. The returned list is empty iff this function is {@code zero}
+     * everywhere. The returned list contains the single, {@link Interval#all() all-encompassing interval} if this
+     * function is non-{@code zero} everywhere.
+     * <p>
+     * Note that the support never contains intervals where this function does not have values, i.e. where
+     * {@link #apply(Object)} would return {@code null}.
      *
      * @param zero the test value
-     * @return a
+     * @return the intervals where this function has a value different from the given zero value.
      */
     public List<Interval<X>> support(V zero) {
-        List<Interval<X>> result = new ArrayList<>();
-
-        var iterator = this.values.entrySet().iterator();
-        var last = iterator.next();
-
-        Interval.Bound<X> nonZeroSince = last.getValue().equals(zero) ? null : unboundedBelow();
-
-        while (iterator.hasNext()) {
-            var current = iterator.next();
-            if (current.getValue().equals(zero)) {
-                if (nonZeroSince != null) {
-                    result.add(new Interval<>(nonZeroSince, Bound.of(current.getKey()), xComparator));
-                    nonZeroSince = null;
-                }
-            } else if (nonZeroSince == null) {
-                nonZeroSince = Bound.of(current.getKey());
-            }
-            last = current;
-        }
-
-        if (nonZeroSince != null && !last.getValue().equals(zero)) {
-            result.add(new Interval<>(nonZeroSince, unboundedAbove(), xComparator));
-        }
-
-        return result;
+        // We condense the function values down to a 3-valued Boolean: null if there is no value, true if the value
+        // is zero, false otherwise. The support is exactly the inverse image of false.
+        StepFunction<X, Boolean> normalized = this.andThen(value -> value == null ? null : value.equals(zero));
+        return normalized.asPartitionWithValues().entrySet().stream()
+                         // filter out intervals where this Function is either not defined or equal to false
+                         .filter(entry -> entry.getValue() != null && !entry.getValue())
+                         // then collect the intervals in the domain
+                         .map(Map.Entry::getKey).toList();
     }
 
     @SuppressWarnings("unchecked")
