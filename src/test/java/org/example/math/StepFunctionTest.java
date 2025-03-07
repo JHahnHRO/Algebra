@@ -1,9 +1,8 @@
 package org.example.math;
 
-import static java.math.BigDecimal.*;
-import static org.assertj.core.api.Assertions.*;
-import static org.assertj.core.api.SoftAssertions.assertSoftly;
-import static org.example.math.StepFunction.*;
+import org.example.math.Interval.Bound;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -13,9 +12,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BinaryOperator;
 
-import org.example.math.Interval.Bound;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
+import static java.math.BigDecimal.*;
+import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.SoftAssertions.assertSoftly;
+import static org.example.math.StepFunction.*;
 
 class StepFunctionTest {
     static final BinaryOperator<StepFunction<Integer, BigDecimal>> ADDITION = StepFunction.pointwise(BigDecimal::add);
@@ -25,20 +25,24 @@ class StepFunctionTest {
 
         @Test
         void constantZeroIsZero() {
-            var zero = constant(ZERO);
+            StepFunction<Integer, BigDecimal> zero = constant(ZERO);
 
             assertThat(zero.isConstant()).isTrue();
             assertThat(zero.isConstant(ZERO)).isTrue();
             assertThat(zero.values()).containsExactly(ZERO);
+
+            assertThat(zero.domainOfDefinition()).containsExactly(Interval.all());
         }
 
         @Test
         void constantOneIsNotZero() {
-            StepFunction<Integer, BigDecimal> zero = constant(ONE);
+            StepFunction<Integer, BigDecimal> one = constant(ONE);
 
-            assertThat(zero.isConstant()).isTrue();
-            assertThat(zero.isConstant(ONE)).isTrue();
-            assertThat(zero.values()).containsExactly(ONE);
+            assertThat(one.isConstant()).isTrue();
+            assertThat(one.isConstant(ONE)).isTrue();
+            assertThat(one.values()).containsExactly(ONE);
+
+            assertThat(one.domainOfDefinition()).containsExactly(Interval.all());
         }
 
         @Test
@@ -250,6 +254,8 @@ class StepFunctionTest {
             assertThat(function.apply(Integer.MIN_VALUE)).isNull();
             assertThat(function.apply(0)).isNull();
             assertThat(function.apply(Integer.MAX_VALUE)).isNull();
+
+            assertThat(function.domainOfDefinition()).isEmpty();
         }
 
         @Test
@@ -283,7 +289,7 @@ class StepFunctionTest {
             var interval = Interval.of(1, 3);
             var function = singleStep(interval, ONE, null);
 
-            assertThat(function.support(ZERO)).containsExactly(interval);
+            assertThat(function.domainOfDefinition()).containsExactly(interval);
         }
 
         @Test

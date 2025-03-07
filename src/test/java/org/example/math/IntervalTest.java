@@ -1,16 +1,18 @@
 package org.example.math;
 
-import static org.assertj.core.api.Assertions.*;
-
-import java.util.ArrayList;
-import java.util.Comparator;
-
 import org.example.math.Interval.Bound;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.time.DayOfWeek;
+import java.util.ArrayList;
+import java.util.Comparator;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.SoftAssertions.assertSoftly;
 
 class IntervalTest {
 
@@ -47,6 +49,34 @@ class IntervalTest {
         @Test
         void givenUnboundedAbove_thenDoNotThrow() {
             assertThatNoException().isThrownBy(() -> Interval.of(Bound.of(0), Bound.unboundedAbove()));
+        }
+
+        @Test
+        void allContainsAllPossibleValues() {
+            Interval<DayOfWeek> all = Interval.all();
+            assertSoftly(softly -> {
+                softly.assertThat(all.contains(DayOfWeek.MONDAY)).isTrue();
+                softly.assertThat(all.contains(DayOfWeek.TUESDAY)).isTrue();
+                softly.assertThat(all.contains(DayOfWeek.WEDNESDAY)).isTrue();
+                softly.assertThat(all.contains(DayOfWeek.THURSDAY)).isTrue();
+                softly.assertThat(all.contains(DayOfWeek.FRIDAY)).isTrue();
+                softly.assertThat(all.contains(DayOfWeek.SATURDAY)).isTrue();
+                softly.assertThat(all.contains(DayOfWeek.SUNDAY)).isTrue();
+            });
+        }
+
+        @Test
+        void emptyIntervalDoesNotContainAnyValues() {
+            Interval<DayOfWeek> all = Interval.empty();
+            assertSoftly(softly -> {
+                softly.assertThat(all.contains(DayOfWeek.MONDAY)).isFalse();
+                softly.assertThat(all.contains(DayOfWeek.TUESDAY)).isFalse();
+                softly.assertThat(all.contains(DayOfWeek.WEDNESDAY)).isFalse();
+                softly.assertThat(all.contains(DayOfWeek.THURSDAY)).isFalse();
+                softly.assertThat(all.contains(DayOfWeek.FRIDAY)).isFalse();
+                softly.assertThat(all.contains(DayOfWeek.SATURDAY)).isFalse();
+                softly.assertThat(all.contains(DayOfWeek.SUNDAY)).isFalse();
+            });
         }
     }
 

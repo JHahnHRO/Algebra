@@ -1,29 +1,13 @@
 package org.example.math;
 
-import static org.example.math.Interval.Bound.unboundedAbove;
-import static org.example.math.Interval.Bound.unboundedBelow;
+import org.example.math.Interval.Bound;
 
 import java.math.BigDecimal;
-import java.util.AbstractMap;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.SequencedMap;
-import java.util.function.BiConsumer;
-import java.util.function.BiFunction;
-import java.util.function.BinaryOperator;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.UnaryOperator;
-import java.util.stream.Collectors;
+import java.util.*;
+import java.util.function.*;
 
-import org.example.math.Interval.Bound;
+import static org.example.math.Interval.Bound.unboundedAbove;
+import static org.example.math.Interval.Bound.unboundedBelow;
 
 /**
  * Represents a "step function", i.e. a function whose domain can be partitioned into a finite number of
@@ -46,20 +30,22 @@ public final class StepFunction<X, V> implements Function<X, V> {
     private final List<Map.Entry<X, V>> entries;
 
     private StepFunction(List<Map.Entry<X, V>> entries, Comparator<? super X> xComparator) {
-        this.xComparator = xComparator;
+        this.xComparator = Objects.requireNonNull(xComparator);
 
-        this.entries = entries.stream().mapMulti(new BiConsumer<Map.Entry<X, V>, Consumer<Map.Entry<X, V>>>() {
-            Object last = new Object(); // sentinel value
+        // stateful predicate to merge steps with equal values by filtering out intermediate entries
+        Predicate<Map.Entry<X, V>> notEqualToPreviousValue = new Predicate<>() {
+            Object last = new Object(); // sentinel value that definitely never occurs in the given values
 
             @Override
-            public void accept(Map.Entry<X, V> current, Consumer<Map.Entry<X, V>> downstream) {
-                // merge steps with equal values by removing intermediate entries
-                if (!Objects.equals(current.getValue(), last)) {
-                    downstream.accept(current);
+            public boolean test(Map.Entry<X, V> current) {
+                if (!Objects.equals(last, current.getValue())) {
                     last = current.getValue();
+                    return true;
                 }
+                return false;
             }
-        }).toList();
+        };
+        this.entries = entries.stream().filter(notEqualToPreviousValue).toList();
     }
 
     /**
@@ -284,14 +270,30 @@ public final class StepFunction<X, V> implements Function<X, V> {
      */
     public List<Interval<X>> support(V zero) {
         Objects.requireNonNull(zero);
+        return differentFrom(zero);
+    }
+
+    private List<Interval<X>> differentFrom(V v) {
         // We condense the function values down to a 3-valued Boolean: null if there is no value, true if the value
-        // is zero, false otherwise. The support is exactly the inverse image of false.
-        StepFunction<X, Boolean> normalized = this.andThen(zero::equals);
+        // is v, false otherwise. The support is exactly the pre-image of false.
+        StepFunction<X, Boolean> normalized = this.andThen(value -> value == null ? null : value.equals(v));
         return normalized.asPartitionWithValues().entrySet().stream()
-                         // filter out intervals where this Function is either not defined or equal to false
+                         // filter out intervals where this Function is either not defined or equal to v
                          .filter(entry -> entry.getValue() != null && !entry.getValue())
-                         // then collect the intervals in the domain
+                         // then collect the remaining intervals in the domain
                          .map(Map.Entry::getKey).toList();
+    }
+
+    /**
+     * Returns the domain of this function, i.e. the set of instances of {@code X} where this step function has a value,
+     * expressed as a list of disjoint {@link Interval}s. The returned list is empty iff this function is {@code null}
+     * everywhere. The returned list contains the single, {@link Interval#all() all-encompassing interval} if this
+     * function is total, i.e. if it returns non-{@code null} for every input.
+     *
+     * @return the intervals where this function has a value.
+     */
+    public List<Interval<X>> domainOfDefinition() {
+        return differentFrom(null);
     }
 
     @Override
@@ -299,9 +301,7 @@ public final class StepFunction<X, V> implements Function<X, V> {
         Objects.requireNonNull(f);
         Function<V, Y> nullSafeF = v -> v == null ? null : f.apply(v);
         return new StepFunction<>(
-                entries.stream()
-                       .map(e -> newEntry(e.getKey(), nullSafeF.apply(e.getValue())))
-                       .collect(Collectors.toCollection(ArrayList::new)), xComparator);
+                entries.stream().map(e -> newEntry(e.getKey(), nullSafeF.apply(e.getValue()))).toList(), xComparator);
     }
 
 
@@ -349,8 +349,7 @@ public final class StepFunction<X, V> implements Function<X, V> {
     }
 
     @FunctionalInterface
-    public interface BiFunctor<X, Y1, Y2, Z>
-            extends BiFunction<StepFunction<X, Y1>, StepFunction<X, Y2>, StepFunction<X, Z>> {}
+    public interface BiFunctor<X, Y1, Y2, Z> extends BiFunction<StepFunction<X, Y1>, StepFunction<X, Y2>, StepFunction<X, Z>> {}
 
     /**
      * @param f    the operator

@@ -26,6 +26,11 @@ import java.util.Optional;
  */
 public record Interval<T>(Bound<T> start, Bound<T> end, Comparator<? super T> comparator) {
 
+    private static final Interval<Comparable<Object>> EMPTY = new Interval<Comparable<Object>>(Bound.unboundedAbove(),
+            Bound.unboundedBelow(), Comparator.naturalOrder());
+    private static final Interval<Comparable<Object>> ALL = new Interval<Comparable<Object>>(Bound.unboundedBelow(),
+            Bound.unboundedAbove(), Comparator.naturalOrder());
+
     /**
      * @param start      the lower bound of this interval. It is contained in the interval.
      * @param end        the upper bound of this interval. It is not contained in the interval.
@@ -74,10 +79,25 @@ public record Interval<T>(Bound<T> start, Bound<T> end, Comparator<? super T> co
         return new Interval<>(start, end, Comparator.naturalOrder());
     }
 
+    /**
+     * @param <T> the type of elements.
+     *
+     * @return the empty interval that does not {@link #contains(Object) contain} any values w.r.t. the natural order.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T extends Comparable<? super T>> Interval<T> empty() {
+        return (Interval<T>) EMPTY;
+    }
+
+    /**
+     * @param <T> the type of elements.
+     *
+     * @return The all-encompassing interval that {@link #contains(Object) contains} all instances of {@code T} w.r.t.
+     * the natural order.
+     */
+    @SuppressWarnings("unchecked")
     public static <T extends Comparable<? super T>> Interval<T> all() {
-        final Bound<T> minusInfinity = Bound.unboundedBelow();
-        final Bound<T> plusInfinity = Bound.unboundedAbove();
-        return new Interval<>(minusInfinity, plusInfinity, Comparator.naturalOrder());
+        return (Interval<T>) ALL;
     }
 
     @Override
